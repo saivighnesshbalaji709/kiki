@@ -1,4 +1,14 @@
-CREATE OR REPLACE PACKAGE BODY XXOA_PO_WF_REQ_NOTIFICATION AS
+create or replace PACKAGE BODY XXOA_PO_WF_REQ_NOTIFICATION AS
+-- *********************************************************************************************
+--
+--             Created By                  Version                            Date
+--
+--  Hexaware Technologies                Initial Version                     18-Dec-2025
+ 
+---- VERSION    DATE             AUTHOR(S)           Remarks
+-- ========   ============     ===============     ============
+-- V1.1      18-Dec-25        Keerthika R         SR 428392
+--***********************************************************************************************
 /* $Header: POXWPA6B.pls 120.27.12020000.8 2015/12/08 09:13:39 bpulivar ship $ */
 
 -- Read the profile option that enables/disables the debug log
@@ -62,7 +72,7 @@ TYPE line_record IS RECORD (
   sugg_site        po_requisition_lines.suggested_vendor_location%TYPE,
   txn_curr_code    po_requisition_lines.currency_code%TYPE,
   curr_unit_price  po_requisition_lines.currency_unit_price%TYPE,
-  csn_reference    po_requisition_lines.attribute2%TYPE);
+  csn_reference    po_requisition_lines.attribute2%TYPE); --Added for SR 428392
 
 TYPE history_record IS RECORD (
 
@@ -1222,7 +1232,7 @@ SELECT rql.requisition_line_id,
        rql.suggested_vendor_location,
        rql.currency_code,
        rql.currency_unit_price,
-       rql.attribute2
+       rql.attribute2  --Added for SR 428392
   FROM po_requisition_lines   rql,
        mtl_system_items_kfv   msi,
        hr_locations_all	      hrt,
@@ -1384,8 +1394,8 @@ PROCEDURE get_req_lines_details_link(document_id        in      varchar2,
    nsegments           number;
    l_segments          fnd_flex_ext.SegmentArray;
    l_cost_center       VARCHAR2(200);
-   l_account           VARCHAR2(200);
-   l_csn_reference     VARCHAR2(200);
+   l_account           VARCHAR2(200); --Added for SR 428392
+   l_csn_reference     VARCHAR2(200); --Added for SR 428392
    l_segment_num       number;
    l_column_name       VARCHAR2(20);
 
@@ -1478,7 +1488,7 @@ SELECT rql.requisition_line_id,
        decode(rql.source_type_code, 'VENDOR',rql.suggested_vendor_location,''),
        rql.currency_code,
        rql.currency_unit_price,
-       rql.attribute2
+       rql.attribute2  --Added for SR 428392
   FROM po_requisition_lines   rql,
        mtl_system_items_kfv   msi,
        hr_locations_all       hrt,
@@ -1734,7 +1744,7 @@ BEGIN
       i := i + 1;
     
       begin
-      l_account := NULL;
+      l_account := NULL;  --Added for SR 428392
         begin
             SELECT gcc.concatenated_segments
             INTO l_account
@@ -1753,7 +1763,7 @@ BEGIN
         END;
         end loop;
        close ccId_csr;
-      /*if l_segment_num = -1 then
+      /*if l_segment_num = -1 then  --Commented for SR 428392
 	 l_cost_center := '';
       else
 
@@ -1822,13 +1832,13 @@ BEGIN
                     nvl(l_line.sugg_supplier, '&nbsp') || '</TD>' || NL;
 
       /*l_document := l_document || '<TD ' || L_TABLE_CELL_STYLE || ' headers="costCenter_1">' ||
-                    nvl(l_cost_center, '&nbsp') || '</TD>' || NL;Commen*/
+                    nvl(l_cost_center, '&nbsp') || '</TD>' || NL;*/ --Commented for SR 428392
                     
       l_document := l_document || '<TD ' || L_TABLE_CELL_STYLE || ' headers="account_1">' ||
-                    nvl(l_account, '&nbsp') || '</TD>' || NL;--
+                    nvl(l_account, '&nbsp') || '</TD>' || NL; --Added for SR 428392
       
       l_document := l_document || '<TD ' || L_TABLE_CELL_STYLE || ' headers="csnRef_1">' ||
-                    nvl(l_line.csn_reference, '&nbsp') || '</TD>' || NL;              
+                    nvl(l_line.csn_reference, '&nbsp') || '</TD>' || NL; --Added for SR 428392       
 
       l_document := l_document || '<TD ' || L_TABLE_CELL_STYLE || ' align=left headers="UOM_1">' ||
                     nvl(l_line.uom, '&nbsp') || '</TD>' || NL;

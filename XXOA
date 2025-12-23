@@ -1,0 +1,873 @@
+create or replace PACKAGE BODY      XXOA_PO_APPROVAL_WF
+-- =======================================================================================================
+-- Copyright (c) 2011 Company Project
+-- All rights reserved.
+-- =======================================================================================================
+-- NAME
+-- xxoa_po_approval_wf.pks
+--
+-- Design Reference
+-- 
+--
+-- PROGRAM TYPE
+-- Package Specification
+--
+-- PURPOSE
+-- Customization for PO Approval workflow Notification
+--
+-- NOTES
+--
+--
+-- HISTORY
+-- =======================================================================================================
+-- Version Date Author Activity
+-- =======================================================================================================
+-- 1.0 10-Dec-2013 Praveen Kumar 
+--
+--
+-- =======================================================================================================
+
+IS
+
+
+PROCEDURE set_custom_values (itemtype IN VARCHAR2,
+ itemkey IN VARCHAR2,
+ actid IN NUMBER,
+ funcmode IN VARCHAR2,
+ resultout OUT NOCOPY VARCHAR2) IS
+BEGIN
+
+ wf_engine.SetItemAttrText(itemtype => itemtype,
+ itemkey => itemkey,
+ aname => 'PO_LINES_DETAILS',
+ avalue => 'PLSQLCLOB:APPS.XXOA_PO_APPROVAL_WF.GET_PO_LINES_DETAILS/'||
+ itemtype||':'|| itemkey);
+ 
+ resultout := wf_engine.eng_completed || ':' || 'ACTIVITY_PERFORMED';
+EXCEPTION
+WHEN OTHERS THEN
+resultout := wf_engine.eng_completed || ':' || 'ACTIVITY_PERFORMED'; 
+END set_custom_values; 
+
+
+ -- ----------------------------------------------------------------------------
+    -- This Procedure is copy of PO_WF_PO_NOTIFICATION.GET_PO_LINES_DETAILS to append PO Line details on Notification
+    -- ----------------------------------------------------------------------------
+PROCEDURE get_po_lines_details ( document_id     in    varchar2,
+                                 display_type    in    varchar2,
+                                 document        in out    NOCOPY CLOB, -- <BUG 7006113>
+                                 document_type   in out    NOCOPY varchar2) IS
+
+  l_item_type        wf_items.item_type%TYPE;
+  l_item_key         wf_items.item_key%TYPE;
+
+  l_document_id      po_lines.po_header_id%TYPE;
+  l_org_id           po_lines.org_id%TYPE;
+  l_document_type    VARCHAR2(25);
+
+  l_document         VARCHAR2(32000) := '';
+
+  l_currency_code    fnd_currencies.currency_code%TYPE;
+
+  -- Bug 3668188: added new local var. note: the length of this
+  -- varchar was determined based on the length in POXWPA1B.pls,
+  -- which is the other place 'OPEN_FORM_COMMAND' attribute is used
+
+  l_open_form_command VARCHAR2(200);
+  l_view_po_url      varchar2(1000);   -- HTML Orders R12
+  l_edit_po_url      varchar2(1000);   -- HTML Orders R12
+
+  NL                 VARCHAR2(1) := fnd_global.newline;
+
+  i              NUMBER := 0;
+  max_lines_dsp      NUMBER ;  -- <BUG 7006113>
+  l_line_count       NUMBER := 0; -- <BUG 3616816> # lines/shipments on document
+  line_mesg          fnd_new_messages.message_text%TYPE; --Bug 4695601
+  l_num_records_to_display NUMBER;      -- <BUG 3616816> actual # of records to be displayed in table
+
+  -- <BUG 7006113 START>
+  curr_len           NUMBER := 0; --<BUG 7614278 Reverting back the commented variable>
+  -- prior_len          NUMBER := 0;
+  -- <BUG 7006113 END>
+
+-- po lines cursor
+
+    -- <BUG 3616816 START> Declare TABLEs for each column that is selected
+    -- from po_line_csr and po_line_loc_csr.
+    --
+    
+     l_unit_price po_lines_all.unit_price%type;
+     l_curr_code  po_headers_all.currency_code%type;    
+    
+    TYPE line_num_tbl_type IS TABLE OF PO_LINES.line_num%TYPE;
+    TYPE shipment_num_tbl_type IS TABLE OF PO_LINE_LOCATIONS.shipment_num%TYPE;
+    TYPE item_num_tbl_type IS TABLE OF MTL_SYSTEM_ITEMS_KFV.concatenated_segments%TYPE;
+    TYPE item_revision_tbl_type IS TABLE OF PO_LINES.item_revision%TYPE;
+    TYPE item_desc_tbl_type IS TABLE OF PO_LINES.item_description%TYPE;
+    TYPE uom_tbl_type IS TABLE OF MTL_UNITS_OF_MEASURE.unit_of_measure_tl%TYPE;
+    TYPE quantity_tbl_type IS TABLE OF PO_LINES.quantity%TYPE;
+    TYPE unit_price_tbl_type IS TABLE OF PO_LINES.unit_price%TYPE;
+    TYPE amount_tbl_type IS TABLE OF PO_LINES.amount%TYPE;
+    TYPE location_tbl_type IS TABLE OF HR_LOCATIONS.location_code%TYPE;
+    TYPE organization_name_tbl_type IS TABLE OF ORG_ORGANIZATION_DEFINITIONS.organization_name%TYPE;
+    TYPE need_by_date_tbl_type IS TABLE OF PO_LINE_LOCATIONS.need_by_date%TYPE;
+    TYPE promised_date_tbl_type IS TABLE OF PO_LINE_LOCATIONS.promised_date%TYPE;
+    TYPE shipment_type_tbl_type IS TABLE OF PO_LINE_LOCATIONS.shipment_type%TYPE;
+    TYPE item_id_tbl_type IS TABLE OF PO_LINES.item_id%TYPE;
+    TYPE quantity_agreed_tbl_type IS TABLE OF PO_LINES.quantity_committed%TYPE;--  Vinoth added for additional requirement 
+    TYPE amount_agreed_tbl_type IS TABLE OF PO_LINES.quantity_committed%TYPE;--  Vinoth added for additional requirement 
+
+    l_line_num_tbl         line_num_tbl_type;
+    l_shipment_num_tbl     shipment_num_tbl_type;
+    l_item_num_tbl         item_num_tbl_type;
+    l_item_revision_tbl    item_revision_tbl_type;
+    l_item_desc_tbl        item_desc_tbl_type;
+    l_uom_tbl              uom_tbl_type;
+    l_quantity_tbl         quantity_tbl_type;
+    l_unit_price_tbl       unit_price_tbl_type;
+    l_amount_tbl           amount_tbl_type;
+    l_location_tbl         location_tbl_type;
+    l_org_name_tbl         organization_name_tbl_type;
+    l_need_by_date_tbl     need_by_date_tbl_type;
+    l_promised_date_tbl    promised_date_tbl_type;
+    l_shipment_type_tbl    shipment_type_tbl_type;
+    l_item_id_tbl     item_id_tbl_type;
+    l_quantity_agreed_tbl  quantity_agreed_tbl_type; --  Vinoth added for additional requirement
+    l_amount_agreed_tbl  amount_agreed_tbl_type;--  Vinoth added for additional requirement 
+    --
+    -- <BUG 3616816 END>
+
+/* Bug# 1419139: kagarwal
+** Desc: The where clause pol.org_id = msi.organization_id(+) in the
+** PO lines cursor, po_line_csr, is not correct as the pol.org_id
+** is the operating unit which is not the same as the inventory
+** organization_id.
+**
+** We need to use the financials_system_parameter table for the
+** inventory organization_id.
+**
+** Also did the similar changes for the Release cursor,po_line_loc_csr.
+*/
+
+/* Bug 2401933: sktiwari
+   Modifying cursor po_line_csr to return the translated UOM value
+   instead of unit_meas_lookup_code.
+*/
+
+CURSOR po_line_csr(v_document_id NUMBER) IS
+SELECT pol.line_num,
+       msi.concatenated_segments,
+       pol.item_revision,
+       pol.item_description,
+--     pol.unit_meas_lookup_code, -- bug 2401933.remove
+       nvl(muom.unit_of_measure_tl, pol.unit_meas_lookup_code), -- bug 2401933.add
+       pol.quantity,
+       pol.unit_price,
+       nvl(pol.amount, pol.quantity * pol.unit_price),pol.item_id,
+       quantity_committed,   --  Vinoth added for additional requirement
+       committed_amount --  Vinoth added for additional requirement 
+  FROM po_lines   pol,
+       mtl_system_items_kfv   msi,
+       mtl_units_of_measure   muom,     -- bug 2401933.add
+       financials_system_parameters  fsp
+ WHERE pol.po_header_id = v_document_id
+   AND pol.item_id = msi.inventory_item_id(+)
+   AND NVL(msi.organization_id, fsp.inventory_organization_id) =
+          fsp.inventory_organization_id
+/* Bug 2299484 fixed. prevented the canceled lines to be displayed
+   in notifications.
+*/
+   AND NVL(pol.cancel_flag,'N') = 'N'
+   AND muom.unit_of_measure (+) = pol.unit_meas_lookup_code  -- bug 2401933.add
+ ORDER BY pol.line_num;
+
+-- release shipments cursor
+
+/* Bug# 1530303: kagarwal
+** Desc: We need to change the where clause as the item
+** may not be an inventory item. For this case we should
+** have an outer join with the mtl_system_items_kfv.
+**
+** Changed the condition:
+** pol.item_id = msi.inventory_item_id
+** to pol.item_id = msi.inventory_item_id(+)
+**
+*/
+
+/* Bug# 1718725: kagarwal
+** Desc: The unit of measure may be null at the shipment level
+** hence in this case we need to get the uom from line level.
+**
+** Changed nvl(pll.unit_meas_lookup_code, pol.unit_meas_lookup_code)
+*/
+/* Bug# 1770951: kagarwal
+** Desc: For Releases we should consider the price_override on the shipments
+** and not the price on the Blanket PO line as the shipment price could be
+** different if the price override is enabled on the Blanket.
+*/
+
+/* Bug 2401933: sktiwari
+   Modifying cursor po_line_loc_csr to return the translated UOM value
+   instead of unit_meas_lookup_code.
+*/
+
+CURSOR po_line_loc_csr(v_document_id NUMBER) IS
+SELECT pll.shipment_num,
+       msi.concatenated_segments,
+       pol.item_revision,
+       pol.item_description,
+-- Bug 2401933.start
+--     nvl(pll.unit_meas_lookup_code, pol.unit_meas_lookup_code)
+--         unit_meas_lookup_code,
+       nvl(muom.unit_of_measure_tl, pol.unit_meas_lookup_code),
+-- Bug 2401933.end
+       pll.quantity,
+       nvl(pll.price_override, pol.unit_price) unit_price,
+       hrl.location_code,
+       ood.organization_name,
+       pll.need_by_date,
+       pll.promised_date,
+       pll.shipment_type,
+       --Bug 4950850 Added pll.amount
+       --Bug 5563024 AMOUNT NOT SHOWN FOR A RELEASE SHIPMENT IN APPROVAL NOTIFICATION.
+       nvl(pll.amount, nvl(pll.price_override, pol.unit_price) * pll.quantity),pol.item_id
+  FROM po_lines   pol,
+       po_line_locations pll,
+       mtl_system_items_kfv msi,
+       hr_locations_all hrl,
+       hz_locations hz,
+       org_organization_definitions ood,
+       mtl_units_of_measure   muom,     -- Bug 2401933.add
+       financials_system_parameters  fsp
+  where  PLL.PO_RELEASE_ID = v_document_id
+  and    PLL.po_line_id    = POL.po_line_id
+  and    PLL.ship_to_location_id = HRL.location_id (+)
+  and    PLL.ship_to_location_id = HZ.location_id (+)
+  and    PLL.ship_to_organization_id = OOD.organization_id
+  and    pol.item_id = msi.inventory_item_id(+)
+  and    NVL(msi.organization_id, fsp.inventory_organization_id) =
+          fsp.inventory_organization_id
+ /* Bug 2299484 fixed. prevented the canceled shipments to be displayed
+   in notifications.
+*/
+   AND NVL(PLL.cancel_flag,'N') = 'N'
+   AND muom.unit_of_measure (+) = pol.unit_meas_lookup_code  -- Bug 2401933.add
+  order by Shipment_num asc;
+
+BEGIN
+
+  l_item_type := substr(document_id, 1, instr(document_id, ':') - 1);
+  l_item_key := substr(document_id, instr(document_id, ':') + 1,
+                       length(document_id) - 2);
+                       
+DBMS_OUTPUT.PUT_LINE ( 'l_item_type = ' || l_item_type );
+DBMS_OUTPUT.PUT_LINE ( 'l_item_key = ' || l_item_key );                       
+
+  /* Bug# 2353153
+  ** Setting application context
+  */
+
+  PO_REQAPPROVAL_INIT1.Set_doc_mgr_context(l_item_type, l_item_key);
+
+  l_document_id := wf_engine.GetItemAttrNumber (itemtype   => l_item_type,
+                                             itemkey    => l_item_key,
+                                             aname      => 'DOCUMENT_ID');
+
+  l_org_id := wf_engine.GetItemAttrNumber (itemtype   => l_item_type,
+                                           itemkey    => l_item_key,
+                                           aname      => 'ORG_ID');
+
+  l_document_type := wf_engine.GetItemAttrText (itemtype   => l_item_type,
+                                               itemkey    => l_item_key,
+                                               aname      => 'DOCUMENT_TYPE');
+
+  PO_MOAC_UTILS_PVT.set_org_context(l_org_id) ;       -- <R12 MOAC>
+
+--DBMS_OUTPUT.PUT_LINE ( 'l_document_id = ' || l_document_id );
+--DBMS_OUTPUT.PUT_LINE ( 'l_document_type = ' || l_document_type );
+  /* Bug# 1686066: kagarwal
+  ** Desc: Use the functional currency of the PO for the precision of
+  ** line amounts.
+  */
+
+  l_currency_code := wf_engine.GetItemAttrText
+                               (itemtype   => l_item_type,
+                                itemkey    => l_item_key,
+                                aname      => 'FUNCTIONAL_CURRENCY');
+
+
+  -- Bug 3668188
+  l_open_form_command := PO_WF_UTIL_PKG.GetItemAttrText
+                               (itemtype   => l_item_type,
+                                itemkey    => l_item_key,
+                                aname      => 'OPEN_FORM_COMMAND');
+
+  -- HTML Orders R12
+  -- Get the PO HTML Page URL's
+  l_view_po_url := PO_WF_UTIL_PKG.GetItemAttrText (
+                              itemtype   => l_item_type,
+                              itemkey    => l_item_key,
+                              aname      => 'VIEW_DOC_URL');
+
+  l_edit_po_url := PO_WF_UTIL_PKG.GetItemAttrText (
+                              itemtype   => l_item_type,
+                              itemkey    => l_item_key,
+                              aname      => 'EDIT_DOC_URL');
+
+
+/* Bug# 2668222: kagarwal
+** Desc: Using profile PO_NOTIF_LINES_LIMIT to get the maximum
+** number of PO lines to be displayed in Approval notification.
+** The same profile is also used for Requisitions.
+*/
+  -- <BUG 7006113  START Moved this code to the later section of the procedure >
+  --  max_lines_dsp:= to_number(fnd_profile.value('PO_NOTIF_LINES_LIMIT'));
+
+  -- if max_lines_dsp is NULL then
+  --   max_lines_dsp := 20;
+  -- end if;
+  -- <BUG 7006113 END>
+
+    -- <BUG 3616816 START> Fetch Release Shipments/PO Lines data into Tables.
+    --
+    IF ( l_document_type = 'RELEASE' ) THEN
+
+        OPEN po_line_loc_csr(l_document_id);
+
+        FETCH po_line_loc_csr BULK COLLECT INTO l_shipment_num_tbl
+                                              , l_item_num_tbl
+                                              , l_item_revision_tbl
+                                              , l_item_desc_tbl
+                                              , l_uom_tbl
+                                              , l_quantity_tbl
+                                              , l_unit_price_tbl
+                                              , l_location_tbl
+                                              , l_org_name_tbl
+                                              , l_need_by_date_tbl
+                                              , l_promised_date_tbl
+                                              , l_shipment_type_tbl
+                                              , l_amount_tbl
+                                              , l_item_id_tbl;    --bug 4950850
+
+        l_line_count := po_line_loc_csr%ROWCOUNT; -- Get # of records fetched.
+
+        CLOSE po_line_loc_csr;
+
+    ELSE
+
+        OPEN po_line_csr(l_document_id);
+
+        FETCH po_line_csr BULK COLLECT INTO l_line_num_tbl
+                                          , l_item_num_tbl
+                                          , l_item_revision_tbl
+                                          , l_item_desc_tbl
+                                          , l_uom_tbl
+                                          , l_quantity_tbl
+                                          , l_unit_price_tbl
+                                          , l_amount_tbl
+                                          , l_item_id_tbl
+                                          , l_quantity_agreed_tbl--  Vinoth added for additional requirement
+                                          , l_amount_agreed_tbl; --  Vinoth added for additional requirement 
+
+        l_line_count := po_line_csr%ROWCOUNT; -- Get # of records fetched.
+
+        CLOSE po_line_csr;
+
+    END IF;
+    
+    DBMS_OUTPUT.PUT_LINE ( 'l_line_count = ' || l_line_count );
+    --
+    -- <BUG 3616816 END>
+
+    max_lines_dsp:= to_number(fnd_profile.value('PO_NOTIF_LINES_LIMIT'));
+
+    IF max_lines_dsp IS NULL THEN
+
+    max_lines_dsp := l_line_count;
+
+    END IF;
+
+    -- <BUG 3616816 START> Determine the actual number of records to display
+    -- in the table.
+    --
+    IF ( l_line_count >= max_lines_dsp )
+    THEN
+        l_num_records_to_display := max_lines_dsp;
+    ELSE
+        l_num_records_to_display := l_line_count;
+    END IF;
+    --
+    -- <BUG 3616816 END>
+
+  if (display_type = 'text/html') then
+
+    if (nvl(l_document_type, 'PO') <> 'RELEASE') then
+
+        l_document := NL || NL || '<!-- PO_LINE_DETAILS -->'|| NL || NL || '<P><B>';
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_PO_LINE_DETAILS');
+        l_document := l_document || '</B>' || NL || '<P>';     -- <BUG 3616816>
+
+        -- <BUG 3616816 START> Only display message if # of actual lines is
+        -- greater than maximum limit.
+        --
+        IF ( l_line_count > max_lines_dsp ) THEN
+
+            -- Bug 3668188: changed the code check (originally created
+            -- in bug 3607009) that determines which message to show
+            -- based on whether Open Document icon is shown in the notif.
+            -- The value of WF attribute 'OPEN_FORM_COMMAND' is set in a
+            -- previous node, using the get_po_user_msg_attribute procedure.
+            --
+            -- HTML Orders R12
+            -- Check for the URL parameters as well
+            IF  (l_open_form_command IS NULL ) AND
+                (l_view_po_url IS NULL )       AND
+                (l_edit_po_url IS NULL )
+            THEN
+               -- "The first [COUNT] Purchase Order lines are summarized below."
+               FND_MESSAGE.set_name('PO','PO_WF_NOTIF_PO_LINE_MESG_TRUNC');
+            ELSE
+               -- "The first [COUNT] Purchase Order lines are summarized
+               -- below. For information on additional lines, please click
+               -- the Open Document icon."
+               FND_MESSAGE.set_name('PO','PO_WF_NOTIF_PO_LINE_MESG');
+            END IF;
+
+            FND_MESSAGE.set_token('COUNT',to_char(max_lines_dsp));
+            line_mesg := FND_MESSAGE.get;
+            l_document := l_document || line_mesg || '<P>';
+
+
+        END IF;
+        --
+        -- <BUG 3616816 END>
+
+        l_document := l_document || NL || '<TABLE border=1 cellpadding=2 cellspacing=1 summary="' ||  fnd_message.get_string('ICX','ICX_POR_TBL_PO_TO_APPROVE_SUM') || '"> '|| NL;
+
+        l_document := l_document || '<TR>' || NL;
+
+        l_document := l_document || '<TH  id="lineNum_1">' ||
+                      fnd_message.get_string('PO', 'PO_WF_NOTIF_LINE_NUMBER') || '</TH>' || NL;
+
+        l_document := l_document || '<TH  id="itemNum_1">' ||
+                      fnd_message.get_string('PO', 'PO_WF_NOTIF_ITEM_NUMBER') || '</TH>' || NL;
+
+       l_document := l_document || '<TH  id="itemRev_1">' ||
+                  fnd_message.get_string('PO', 'PO_WF_NOTIF_ITEM_REVISION') || '</TH>' || NL;
+
+        l_document := l_document || '<TH  id="itemDesc_1">' ||
+                      fnd_message.get_string('PO', 'PO_WF_NOTIF_ITEM_DESC') || '</TH>' || NL;
+
+        l_document := l_document || '<TH  id="uom_1">' ||
+                      fnd_message.get_string('PO', 'PO_WF_NOTIF_UOM') || '</TH>' || NL;
+
+        l_document := l_document || '<TH  id="quant_1">' ||
+                  fnd_message.get_string('PO', 'PO_WF_NOTIF_QUANTITY') || '</TH>' || NL;
+
+        l_document := l_document || '<TH  id="unitPrice_1">' ||
+                  fnd_message.get_string('PO', 'PO_WF_NOTIF_UNIT_PRICE') || '</TH>' || NL;
+
+        l_document := l_document || '<TH  id="lineAmt_1">' ||
+                  fnd_message.get_string('PO', 'PO_WF_NOTIF_LINE_AMOUNT') || '</TH>' || NL;
+        l_document := l_document || '<TH  id="qtyagreed_1">' || --  Vinoth added for additional requirement
+                  fnd_message.get_string('PO', 'PO_WF_NOTIF_QTY_AGREED') || '</TH>' || NL;
+        l_document := l_document || '<TH  id="amtagreed_1">' || --  Vinoth added for additional requirement
+                  fnd_message.get_string('PO', 'PO_WF_NOTIF_AMT_AGREED') || '</TH>' || NL;                  
+        l_document := l_document || '<TH  id="lineAmt_1">' ||
+                  'Last PO Price' || '</TH>' || NL;
+        l_document := l_document || '<TH  id="lineAmt_1">' ||
+                  'Last PO Currency' || '</TH>' || NL;                  
+        l_document := l_document || '</TR>' || NL;
+
+        -- curr_len  := lengthb(l_document);
+        -- prior_len := curr_len;
+
+        FOR i IN 1..l_num_records_to_display LOOP              -- <BUG 3616816>
+        
+        
+        l_unit_price:=null;
+        l_curr_code:=null;
+        
+             BEGIN
+                SELECT pl3.unit_price, ph3.currency_code
+                  INTO l_unit_price,l_curr_code
+                  FROM po_lines_all pl3, po_headers_all ph3
+                 WHERE ph3.po_header_id = pl3.po_header_id
+                   AND ph3.po_header_id<>l_document_id
+                       AND pl3.po_line_id =
+                             (SELECT MAX (pl2.po_line_id)
+                                FROM po_lines_all pl2, po_headers_all ph2
+                               WHERE     pl2.item_id = l_item_id_tbl(i)
+                                     AND pl2.unit_meas_lookup_code = l_uom_tbl(i)
+                                     AND pl2.po_header_id = ph2.po_header_id
+                                     AND ph2.authorization_status = 'APPROVED'
+                                     AND ph2.po_header_id<>l_document_id
+                                     AND ph2.creation_date =
+                                           (SELECT MAX (ph1.creation_date)
+                                              FROM po_lines_all pl1, po_headers_all ph1
+                                             WHERE pl1.item_id = pl2.item_id
+                                             AND ph1.po_header_id<>l_document_id
+                                                   AND pl1.unit_meas_lookup_code =
+                                                         pl2.unit_meas_lookup_code
+                                                   AND pl1.po_header_id = ph1.po_header_id
+                                                   AND ph1.authorization_status = 'APPROVED'));
+             EXCEPTION
+             WHEN OTHERS THEN
+             NULL;
+             END;                                              
+
+                /* Exit the cursor if the current document length and 2 times the
+                ** length added in prior line exceeds 32000 char */
+        -- < BUG 7006113 START Commented the loop to avoid the check so that maximum
+                --  lines can be displayed >
+                -- if (curr_len + (2 * (curr_len - prior_len))) >= 32000 then
+                --  exit;
+                --  end if;
+        --  prior_len := curr_len;
+        -- < BUG 7006113 END >
+
+              l_document := l_document || '<TR>' || NL;
+
+              l_document := l_document || '<TD nowrap align=center headers="lineNum_1">'
+                            || nvl(to_char(l_line_num_tbl(i)), '&nbsp') || '</TD>' || NL;
+              l_document := l_document || '<TD nowrap headers="itemNum_1">'
+                            || nvl(l_item_num_tbl(i), '&nbsp') || '</TD>' || NL;
+              l_document := l_document || '<TD nowrap headers="itemRev_1">'
+                            || nvl(l_item_revision_tbl(i), '&nbsp') || '</TD>' || NL;
+              l_document := l_document || '<TD nowrap headers="itemDesc_1">'
+                            || nvl(l_item_desc_tbl(i), '&nbsp') || '</TD>' || NL;
+              l_document := l_document || '<TD nowrap headers="uom_1">'
+                            || nvl(l_uom_tbl(i), '&nbsp') || '</TD>' || NL;
+              l_document := l_document || '<TD nowrap align=right headers="quant_1">'
+                            || nvl(to_char(l_quantity_tbl(i)), '&nbsp') || '</TD>' || NL;
+
+/* Bug 2868931: kagarwal
+** We will not format the unit price on the lines in notifications
+*/
+                -- Bug 3547777. Added the nvl clauses to unit_price and line_
+                -- amount so that box is still displayed even if value is null.
+              l_document := l_document || '<TD nowrap align=right headers="unitPrice_1">' ||
+                     nvl(PO_WF_REQ_NOTIFICATION.FORMAT_CURRENCY_NO_PRECESION(l_currency_code,l_unit_price_tbl(i)),'&nbsp') || '</TD>' || NL; -- <BUG 7006113>
+
+              l_document := l_document || '<TD nowrap align=right headers="lineAmt_1">' ||
+                  nvl(TO_CHAR(l_amount_tbl(i), FND_CURRENCY.GET_FORMAT_MASK(
+                              l_currency_code, 30)),'&nbsp') || '</TD>' || NL;
+              l_document := l_document || '<TD nowrap align=right headers="qtyagreed_1">' ||--  Vinoth added for additional requirement
+                  nvl(TO_CHAR(l_quantity_agreed_tbl(i)),'&nbsp') || '</TD>' || NL;
+              l_document := l_document || '<TD nowrap align=right headers="amtagreed_1">' ||--  Vinoth added for additional requirement
+                  nvl(TO_CHAR(l_amount_agreed_tbl(i)),'&nbsp') || '</TD>' || NL;
+              l_document := l_document || '<TD nowrap align=right headers="lineAmt_1">' ||
+                  nvl(TO_CHAR(l_unit_price, FND_CURRENCY.GET_FORMAT_MASK(
+                              l_currency_code, 30)),'&nbsp') || '</TD>' || NL;
+              l_document := l_document || '<TD nowrap align=center headers="lineAmt_1">' ||l_curr_code|| '</TD>' || NL;                                                            
+
+              l_document := l_document || '</TR>' || NL;
+
+                -- <BUG 7006113 START>
+        --curr_len  := lengthb(l_document);
+
+                wf_notification.writetoclob(document, l_document);--praveen
+                  --DBMS_OUTPUT.PUT_LINE ( 'l_document = ' || l_document );
+
+                l_document := NULL;
+
+        EXIT WHEN i = l_num_records_to_display;
+        -- <BUG 7006113 END>
+        end loop;
+
+    else    -- release
+
+        l_document := NL || NL || '<!-- RELEASE_SHIPMENT_DETAILS -->'|| NL || NL || '<P><B>';
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_SHIP_DETAILS');
+        l_document := l_document || '</B>' || NL || '<P>';
+
+        -- <BUG 3616816 START> Only display message if # of actual lines is
+        -- greater than maximum limit.
+        --
+        IF ( l_line_count > max_lines_dsp )
+        THEN
+            FND_MESSAGE.set_name('PO','PO_WF_NOTIF_PO_REL_SHIP_MESG');
+            FND_MESSAGE.set_token('COUNT',to_char(max_lines_dsp));
+            line_mesg := FND_MESSAGE.get;
+            l_document := l_document || line_mesg || '<P>';
+        END IF;
+        --
+        -- <BUG 3616816 END>
+
+        l_document := l_document || '<TABLE border=1 cellpadding=2 cellspacing=1 summary="' ||  fnd_message.get_string('ICX','ICX_POR_TBL_BL_TO_APPROVE_SUM') || '"> '|| NL;
+
+        l_document := l_document || '<TR>' || NL;
+
+        l_document := l_document || '<TH  id="shipNum_2">' ||
+                      fnd_message.get_string('PO', 'PO_WF_NOTIF_SHIP_NUMBER') || '</TH>' || NL;
+
+        l_document := l_document || '<TH  id="itemNum_2">' ||
+                      fnd_message.get_string('PO', 'PO_WF_NOTIF_ITEM_NUMBER') || '</TH>' || NL;
+
+       l_document := l_document || '<TH  id="itemRev_2">' ||
+                  fnd_message.get_string('PO', 'PO_WF_NOTIF_ITEM_REVISION') || '</TH>' || NL;
+
+        l_document := l_document || '<TH  id="itemDesc_2">' ||
+                      fnd_message.get_string('PO', 'PO_WF_NOTIF_ITEM_DESC') || '</TH>' || NL;
+
+        l_document := l_document || '<TH  id="uom_2">' ||
+                      fnd_message.get_string('PO', 'PO_WF_NOTIF_UOM') || '</TH>' || NL;
+
+        l_document := l_document || '<TH  id="quant_2">' ||
+                  fnd_message.get_string('PO', 'PO_WF_NOTIF_QUANTITY') || '</TH>' || NL;
+
+        l_document := l_document || '<TH  id="unitPrice_2">' ||
+                  fnd_message.get_string('PO', 'PO_WF_NOTIF_UNIT_PRICE') || '</TH>' || NL;
+
+        l_document := l_document || '<TH  id="location_2">' ||
+                  fnd_message.get_string('PO', 'PO_WF_NOTIF_LOCATION') || '</TH>' || NL;
+
+        l_document := l_document || '<TH  id="shipToOrg_2">' ||
+                  fnd_message.get_string('PO', 'POA_SHIP_TO_ORG') || '</TH>' || NL;
+
+        l_document := l_document || '<TH  id="needByDate_2">' ||
+                  fnd_message.get_string('PO', 'PO_WF_NOTIF_NEED_BY_DATE') || '</TH>' || NL;
+    /* bug 4950850 */
+           l_document := l_document || '<TH  id="lineAmt_2">' ||
+                  fnd_message.get_string('PO', 'PO_WF_NOTIF_AMOUNT') || '</TH>' || NL;
+
+        l_document := l_document || '</TR>' || NL;
+
+        -- curr_len  := lengthb(l_document);
+        -- prior_len := curr_len;
+
+        FOR i IN 1..l_num_records_to_display LOOP              -- <BUG 3616816>
+
+                /* Exit the cursor if the current document length and 2 times the
+                ** length added in prior line exceeds 32000 char */
+                -- < BUG 7006113 START Commented the loop to avoid the check so that
+        --   maximum lines can be displayed >
+                -- if (curr_len + (2 * (curr_len - prior_len))) >= 32000 then
+                --   exit;
+                -- end if;
+        -- prior_len := curr_len;
+        -- < BUG 7006113 END >
+
+              l_document := l_document || '<TR>' || NL;
+
+           l_document := l_document || '<TD nowrap align=center headers="shipNum_2">'
+                || nvl(to_char(l_shipment_num_tbl(i)), '&nbsp') || '</TD>' || NL;
+              l_document := l_document || '<TD nowrap  headers="itemNum_2">'
+                || nvl(l_item_num_tbl(i), '&nbsp') || '</TD>' || NL;
+              l_document := l_document || '<TD nowrap  headers="itemRev_2">'
+                || nvl(l_item_revision_tbl(i), '&nbsp') || '</TD>' || NL;
+              l_document := l_document || '<TD nowrap  headers="itemDesc_2">'
+                || nvl(l_item_desc_tbl(i), '&nbsp') || '</TD>' || NL;
+              l_document := l_document || '<TD nowrap  headers="uom_2">'
+                || nvl(l_uom_tbl(i), '&nbsp') || '</TD>' || NL;
+              l_document := l_document || '<TD nowrap align=right  headers="quant_2">'
+                || nvl(to_char(l_quantity_tbl(i)), '&nbsp') || '</TD>' || NL;
+
+/* Bug 2868931: kagarwal
+** We will not format the unit price on the lines in notifications
+*/
+
+              l_document := l_document || '<TD nowrap align=right  headers="unitPrice_2">' ||
+                                  nvl(PO_WF_REQ_NOTIFICATION.FORMAT_CURRENCY_NO_PRECESION(
+                      l_currency_code,l_unit_price_tbl(i)),'&nbsp') || '</TD>' || NL;  -- <BUG 7006113>
+
+              l_document := l_document || '<TD nowrap  headers="location_2">'
+                || nvl(l_location_tbl(i), '&nbsp') || '</TD>' || NL;
+              l_document := l_document || '<TD nowrap  headers="shipToOrg_2">'
+                || nvl(l_org_name_tbl(i), '&nbsp') || '</TD>' || NL;
+              l_document := l_document || '<TD nowrap  headers="needByDate_2">'
+                || to_char(l_need_by_date_tbl(i)) || '</TD>' || NL;
+                /* bug 4950850 */
+                l_document := l_document || '<TD nowrap align=right headers="lineAmt_2">' ||
+                  nvl(TO_CHAR(l_amount_tbl(i), FND_CURRENCY.GET_FORMAT_MASK(
+                              l_currency_code, 30)),'&nbsp') || '</TD>' || NL;
+              l_document := l_document || '</TR>' || NL;
+
+                -- <BUG 7006113 START>
+        -- curr_len  := lengthb(l_document);
+
+                wf_notification.writetoclob(document, l_document);
+
+                l_document := NULL;
+
+        EXIT WHEN i = l_num_records_to_display;
+        -- <BUG 7006113 END>
+
+        end loop;
+
+    end if;
+    l_document := l_document || '</TABLE></P>' || NL;
+
+    --<BUG 7614278 Added condition to check whether the document has value and if
+    --so call the function WriteToClob().
+    curr_len := lengthb(l_document);
+    IF (NVL(curr_len,0) > 0 ) THEN
+    wf_notification.writetoclob(document, l_document); --Praveen    -- <BUG 7006113>
+    
+    --DBMS_OUTPUT.PUT_LINE ( 'l_document = ' || l_document );
+    END IF;
+    -- document := l_document; -- <BUG 7006113>
+
+  elsif (display_type = 'text/plain') then
+
+    if (nvl(l_document_type, 'PO') <> 'RELEASE') then
+
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_PO_LINE_DETAILS') || NL || NL;
+
+        -- <BUG 3616816 START> Only display message if # of actual lines is
+        -- greater than maximum limit.
+        --
+        IF ( l_line_count > max_lines_dsp ) THEN
+
+            -- Bug 3668188: changed the code check (originally created
+            -- in bug 3607009) that determines which message to show
+            -- based on whether Open Document icon is shown in then notif.
+            -- The value of WF attribute 'OPEN_FORM_COMMAND' is set in a
+            -- previous node, using the get_po_user_msg_attribute procedure.
+            -- HTML Orders R12
+            -- Check for the URL parameters as well
+            IF  (l_open_form_command IS NULL) AND
+                (l_view_po_url IS NULL)       AND
+                (l_edit_po_url IS NULL)
+            THEN
+                -- "The first [COUNT] Purchase Order lines are summarized below."
+                FND_MESSAGE.set_name('PO','PO_WF_NOTIF_PO_LINE_MESG_TRUNC');
+            ELSE
+                -- "The first [COUNT] Purchase Order lines are summarized
+                -- below. For information on additional lines, please click
+                -- the Open Document icon."
+                FND_MESSAGE.set_name('PO','PO_WF_NOTIF_PO_LINE_MESG');
+            END IF;
+
+            FND_MESSAGE.set_token('COUNT',to_char(max_lines_dsp));
+            line_mesg := FND_MESSAGE.get;
+            l_document := l_document || line_mesg || NL || NL;
+
+        END IF;
+        --
+        -- <BUG 3616816 END>
+
+        -- curr_len  := lengthb(l_document);
+        -- prior_len := curr_len;
+
+        FOR i IN 1..l_num_records_to_display LOOP              -- <BUG 3616816>
+
+                /* Exit the cursor if the current document length and 2 times the
+                ** length added in prior line exceeds 32000 char */
+                -- < BUG 7006113 START Commented the loop to avoid the check so
+        --   that maximum lines can be displayed >
+                --   if (curr_len + (2 * (curr_len - prior_len))) >= 32000 then
+                --     exit;
+                --   end if;
+        --   prior_len := curr_len;
+        -- < BUG 7006113 END >
+
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_LINE_NUMBER') || ':' || to_char(l_line_num_tbl(i)) || NL;
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_ITEM_NUMBER') || ': ' || l_item_num_tbl(i) || NL;
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_ITEM_REVISION') || ': ' || l_item_revision_tbl(i) || NL;
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_ITEM_DESC') || ': ' || l_item_desc_tbl(i) || NL;
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_UOM') || ': ' || l_uom_tbl(i) || NL;
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_QUANTITY') || ': ' || to_char(l_quantity_tbl(i)) || NL;
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_QTY_AGREED') || ': ' || to_char(l_quantity_agreed_tbl(i)) || NL;--  Vinoth added for additional requirement
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_AMT_AGREED') || ': ' || to_char(l_amount_agreed_tbl(i)) || NL;--  Vinoth added for additional requirement
+
+/* Bug 2868931: kagarwal
+** We will not format the unit price on the lines in notifications
+*/
+
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_UNIT_PRICE') || ': '
+                    || PO_WF_REQ_NOTIFICATION.FORMAT_CURRENCY_NO_PRECESION(l_currency_code,l_unit_price_tbl(i)) || NL;
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_LINE_AMOUNT') || ': '
+                    || to_char(l_amount_tbl(i), FND_CURRENCY.GET_FORMAT_MASK(l_currency_code, 30)) || NL || NL;
+
+        -- < BUG 7006113 START >
+            -- curr_len  := lengthb(l_document);
+
+            wf_notification.writetoclob(document, l_document);
+
+        l_document := NULL;
+
+        EXIT WHEN i = l_num_records_to_display;
+        -- < BUG 7006113 END >
+
+    end loop;
+
+    else   -- release
+
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_SHIP_DETAILS') || NL || NL || NL;
+
+        -- <BUG 3616816 START> Only display message if # of actual lines is
+        -- greater than maximum limit.
+        --
+        IF ( l_line_count > max_lines_dsp )
+        THEN
+            FND_MESSAGE.set_name('PO','PO_WF_NOTIF_PO_REL_SHIP_MESG');
+            FND_MESSAGE.set_token('COUNT',to_char(max_lines_dsp));
+            line_mesg := FND_MESSAGE.get;
+            l_document := l_document || line_mesg || NL || NL;
+        END IF;
+        --
+        -- <BUG 3616816 END>
+
+        -- curr_len  := lengthb(l_document);
+        -- prior_len := curr_len;
+
+        FOR i IN 1..l_num_records_to_display LOOP              -- <BUG 3616816>
+
+                /* Exit the cursor if the current document length and 2 times the
+                ** length added in prior line exceeds 32000 char */
+                -- <BUG 7006113 START Commented the loop to avoid the check so that
+        --  maximum lines can be displayed
+                --  if (curr_len + (2 * (curr_len - prior_len))) >= 32000 then
+                --  exit;
+                --  end if;
+        --  prior_len := curr_len;
+        -- <BUG 7006113 END>
+
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_SHIP_NUMBER') || ': ' || to_char(l_shipment_num_tbl(i)) || NL;
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_ITEM_NUMBER') || ': ' || l_item_num_tbl(i) || NL;
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_ITEM_REVISION') || ': ' || l_item_revision_tbl(i) || NL;
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_ITEM_DESC') || ': ' || l_item_desc_tbl(i) || NL;
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_UOM') || ': ' || l_uom_tbl(i) || NL;
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_QUANTITY') || ': ' || to_char(l_quantity_tbl(i)) || NL;
+
+/* Bug 2868931: kagarwal
+** We will not format the unit price on the lines in notifications
+*/
+
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_UNIT_PRICE') || ': '
+                    ||  PO_WF_REQ_NOTIFICATION.FORMAT_CURRENCY_NO_PRECESION(l_currency_code,l_unit_price_tbl(i)) || NL;
+                -- bug 4950850
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_AMOUNT') || ': '
+                    || to_char(l_amount_tbl(i), FND_CURRENCY.GET_FORMAT_MASK(l_currency_code, 30)) || NL;
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_LOCATION') || ': ' || l_location_tbl(i) || NL;
+        l_document := l_document || fnd_message.get_string('PO', 'POA_SHIP_TO_ORG') || ': ' || l_org_name_tbl(i) || NL;
+        l_document := l_document || fnd_message.get_string('PO', 'PO_WF_NOTIF_NEED_BY_DATE') || ': ' || to_char(l_need_by_date_tbl(i)) || NL || NL;
+
+            -- <BUG 7006113 START>
+        -- curr_len  := lengthb(l_document);
+
+
+            wf_notification.writetoclob(document, l_document);
+
+            l_document := NULL;
+
+        EXIT WHEN i = l_num_records_to_display;
+        -- <BUG 7006113 END>
+
+    end loop;
+
+    end if;
+
+    --<BUG 7614278 Added condition to check whether the document has value and if
+    --so call the function WriteToClob().
+    curr_len := lengthb(l_document);
+    IF (NVL(curr_len,0) > 0 ) THEN
+    wf_notification.writetoclob(document, l_document); -- <BUG 7006113>
+    END IF;
+    -- document := l_document; -- <Bug 7006113>
+  end if;
+
+END get_po_lines_details;
+
+END XXOA_PO_APPROVAL_WF;

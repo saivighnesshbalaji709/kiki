@@ -1707,9 +1707,15 @@ BEGIN
     l_document := l_document || '<TH ' || L_TABLE_HEADER_STYLE || ' width=15% id="supplier_1">' ||
                   fnd_message.get_string('PO', 'PO_WF_NOTIF_SUPPLIER') || '</TH>' || NL;
 
-    l_document := l_document || '<TH ' || L_TABLE_HEADER_STYLE || ' width=5% id="costCenter_1">' ||
-                  fnd_message.get_string('PO', 'PO_WF_NOTIF_COST_CENTER') || '</TH>' || NL;
-
+    /* l_document := l_document || '<TH ' || L_TABLE_HEADER_STYLE || ' width=5% id="costCenter_1">' ||
+                  fnd_message.get_string('PO', 'PO_WF_NOTIF_COST_CENTER') || '</TH>' || NL; */ --Commented for SR 428392
+                  
+    l_document := l_document || '<TH ' || L_TABLE_HEADER_STYLE || ' width=5% id="account_1">' ||
+                  fnd_message.get_string('PO', 'PO_WF_NOTIF_ACCOUNT_NO') || '</TH>' || NL;	--Added for SR 428392
+				  
+    l_document := l_document || '<TH ' || L_TABLE_HEADER_STYLE || ' width=5% id="csnRef_1">' ||
+                  fnd_message.get_string('PO', 'PO_WF_NOTIF_CSNREF') || '</TH>' || NL;	--Added for SR 428392	  
+                  
     l_document := l_document || '<TH ' || L_TABLE_HEADER_STYLE || ' width=5% id="UOM_1">' ||
                   fnd_message.get_string('PO', 'PO_WF_NOTIF_UOM') || '</TH>' || NL;
 

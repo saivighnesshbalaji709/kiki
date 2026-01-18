@@ -107,7 +107,8 @@ WHERE  asup.vendor_id = ass.vendor_id
 <![CDATA[ 
 SELECT
 	qry.*,
-	(qry.entered_amount * qry.exch_rate) accounted_amount
+	(qry.entered_amount * qry.exch_rate) accounted_amount,
+	(qry.invoice_amount * qry.exch_rate) functional_amount  ----Added for SR#430978
 FROM
 	(
 		SELECT 'I'                                         transaction_type
@@ -122,7 +123,7 @@ FROM
 				,ai.invoice_currency_code                    currency_code
 				--,ai.invoice_amount * NVL(ai.exchange_rate,1) accounted_amount
 				--,ai.invoice_amount                           entered_amount
-				,ai.invoice_amount                            invoice_amount  ----added for the SR#429062
+				,to_number(ai.invoice_amount)                 invoice_amount
 				,((
 					NVL
 							  (
@@ -326,6 +327,7 @@ SELECT 'P'                                   transaction_type
       ,aip.accounting_date+1                   gl_date
       ,ac.currency_code                      currency_code
 	  ,ai.invoice_amount                     invoice_amount  ----added for the SR#429062
+	  ,ai.invoice_amount * aip.exchange_rate  functional_amount  ----added for SR#430978
       ,NVL(
 				(aip.amount - 
 					 (SELECT SUM(total_dist_amount -
@@ -467,7 +469,8 @@ ORDER BY gp_period_name, ai.description
 	  <element name="PAYMENT_STATUS"   dataType="VARCHAR2" value="PAYMENT_STATUS_FLAG"/>
       <element name="CANCEL_DATE"      dataType="DATE"     value="CANCEL_DATE"/>
 	  <element name="SAMPLE_DT"      dataType="DATE"     value="SAMPLE_DT"/>
-	  <element name="INVOICE_AMOUNT"      dataType="NUMBER"     value="INVOICE_AMOUNT"/>
+	  <element name="INVOICE_AMOUNT"   dataType="NUMBER"     value="INVOICE_AMOUNT"/>
+	  <element name="FUNCTIONAL_AMOUNT"  dataType="NUMBER"   value="FUNCTIONAL_AMOUNT"/>
 	  
     </group>
 	<group name="G_MAIN1"   source="Q_MAIN1">
@@ -491,7 +494,8 @@ ORDER BY gp_period_name, ai.description
 	  <element name="PAYMENT_REFER_NO"  dataType="VARCHAR2" value="PAYMENT_REFER_NO"/>
       <element name="PAYMENT_STATUS"   dataType="VARCHAR2" value="PAYMENT_STATUS_FLAG"/>
       <element name="CANCEL_DATE"      dataType="DATE"     value="CANCEL_DATE"/>
-	  <element name="INVOICE_AMOUNT"      dataType="NUMBER"     value="INVOICE_AMOUNT"/>  
+	  <element name="INVOICE_AMOUNT"      dataType="NUMBER"     value="INVOICE_AMOUNT"/> 
+      <element name="FUNCTIONAL_AMOUNT"   dataType="NUMBER"   value="FUNCTIONAL_AMOUNT"/>	  
     </group>
   </group>
 </dataStructure>
